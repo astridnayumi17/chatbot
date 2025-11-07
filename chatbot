@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFL Chatbot - Consulta Rápida</title>
+    <!-- Carga de Tailwind CSS para el diseño -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilos personalizados para la atmósfera NFL */
+        :root {
+            --nfl-dark: #0F172A; /* Azul marino oscuro (slate-900) */
+            --nfl-accent: #FACC15; /* Dorado/Amarillo */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--nfl-dark);
+        }
+        /* Estilo para simular el campo de juego en el fondo del chat */
+        .chat-container {
+            background-color: #1F2937; /* Gris oscuro */
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        /* Estilo para los mensajes del chatbot */
+        .bot-message {
+            background-color: #374151; /* Gris más claro */
+            color: white;
+        }
+        /* Estilo para los mensajes del usuario */
+        .user-message {
+            background-color: var(--nfl-accent);
+            color: var(--nfl-dark);
+            align-self: flex-end;
+        }
+        /* Estilo para la animación de carga */
+        .loading::after {
+            content: '...';
+            animation: dot-loading 1s infinite step-start;
+        }
+        @keyframes dot-loading {
+            0% { content: '.'; }
+            33% { content: '..'; }
+            66% { content: '...'; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center p-4">
+
+    <!-- Encabezado Temático NFL -->
+    <header class="w-full max-w-xl text-center mb-6 p-4 rounded-lg bg-gray-800 border-b-4 border-yellow-400">
+        <h1 class="text-3xl font-extrabold uppercase tracking-widest text-white">
+            <span class="text-yellow-400">NFL</span> Bot
+        </h1>
+        <p class="text-sm text-gray-400 mt-1">Tu Asistente de Consulta Rápida de Fútbol Americano</p>
+    </header>
+
+    <!-- Contenedor Principal del Chat -->
+    <main class="chat-container w-full max-w-xl flex flex-col rounded-xl overflow-hidden shadow-2xl h-[75vh]">
+        
+        <!-- Área de visualización de mensajes -->
+        <div id="messages-container" class="flex-grow p-4 space-y-4 overflow-y-auto">
+            <!-- Mensaje de bienvenida -->
+            <div class="flex justify-start">
+                <div class="bot-message p-3 rounded-xl rounded-tl-sm max-w-[80%]">
+                    <p class="font-bold mb-1">NFL Bot</p>
+                    <p>¡Hola! Pregúntame sobre resultados, equipos, jugadores o historia de la NFL. ¿Qué tienes en mente?</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Área de entrada de texto -->
+        <div class="p-4 border-t border-gray-700 flex space-x-2 bg-gray-900">
+            <input 
+                type="text" 
+                id="user-input"
+                placeholder="Escribe tu pregunta sobre la NFL..." 
+                class="flex-grow p-3 rounded-lg border border-gray-600 focus:ring-yellow-400 focus:border-yellow-400 bg-gray-800 text-white placeholder-gray-400 text-base"
+                onkeypress="if(event.key === 'Enter') document.getElementById('send-btn').click()"
+            >
+            <button 
+                id="send-btn"
+                class="bg-yellow-400 text-gray-900 font-bold py-3 px-6 rounded-lg hover:bg-yellow-500 transition duration-200 uppercase disabled:opacity-50"
+                onclick="sendMessage()"
+            >
+                Enviar
+            </button>
+        </div>
+    </main>
+
+    <script>
+        // Variables globales necesarias
+        const apiKey = "AIzaSyBACnhmly4hfun_1nebOxxRJpD03iENKS4"; // 
+        const apiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=" + apiKey;
+        
+        // Elementos del DOM
+        const inputElement = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-btn');
+        const messagesContainer = document.getElementById('messages-container');
+
+        // --- Funciones de Utilidad de UI ---
+
+        /**
+         * Crea y añade un nuevo elemento de mensaje al contenedor.
+         * @param {string} text - El texto del mensaje.
+         * @param {boolean} isUser - True si es mensaje de usuario, False si es del bot.
+         * @param {boolean} isLoading - True para mostrar el indicador de carga.
+         * @returns {HTMLElement} El elemento del mensaje creado.
+         */
+        function addMessageToContainer(text, isUser, isLoading = false) {
+            const wrapper = document.createElement('div');
+            wrapper.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `p-3 rounded-xl max-w-[80%] shadow-md text-base ${isUser 
+                ? 'user-message rounded-br-sm' 
+                : 'bot-message rounded-tl-sm'}`;
+
+            if (!isUser) {
+                const botName = document.createElement('p');
+                botName.className = 'font-bold mb-1 text-yellow-400';
+                botName.textContent = 'NFL Bot';
+                messageDiv.appendChild(botName);
+            }
+
+            const textNode = document.createElement('p');
+            textNode.textContent = text;
+            
+            if (isLoading) {
+                textNode.classList.add('loading');
+                messageDiv.id = 'loading-message';
+            }
+
+            messageDiv.appendChild(textNode);
+            wrapper.appendChild(messageDiv);
+            messagesContainer.appendChild(wrapper);
+
+            // Desplazarse al final
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            return messageDiv;
+        }
+
+        /**
+         * Habilita o deshabilita la entrada de usuario.
+         * @param {boolean} enable - True para habilitar, False para deshabilitar.
+         */
+        function setInputEnabled(enable) {
+            inputElement.disabled = !enable;
+            sendButton.disabled = !enable;
+        }
+
+        // --- Lógica del Chatbot y API ---
+
+        /**
+         * Envía el mensaje del usuario y llama a la API de Gemini.
+         */
+        async function sendMessage() {
+            const prompt = inputElement.value.trim();
+            if (!prompt) return;
+
+            // 1. Mostrar mensaje del usuario y deshabilitar entrada
+            addMessageToContainer(prompt, true);
+            inputElement.value = '';
+            setInputEnabled(false);
+
+            // 2. Mostrar indicador de carga del bot
+            const loadingMessage = addMessageToContainer("El bot está pensando", false, true);
+
+            try {
+                const systemPrompt = "Actúa como un comentarista experto de la NFL. Responde de forma concisa y entusiasta sobre resultados, estadísticas o noticias de fútbol americano.";
+                const maxRetries = 3;
+                let responseText = await generateContentWithRetry(prompt, systemPrompt, maxRetries);
+                
+                // 3. Eliminar el mensaje de carga y mostrar la respuesta
+                messagesContainer.removeChild(loadingMessage.parentElement);
+                addMessageToContainer(responseText, false);
+
+            } catch (error) {
+                console.error("Error al obtener respuesta de Gemini:", error);
+                
+                // 3. Eliminar el mensaje de carga y mostrar el error
+                messagesContainer.removeChild(loadingMessage.parentElement);
+                addMessageToContainer("Disculpa, hubo un problema al conectar con el servidor de la NFL Bot. Intenta de nuevo más tarde.", false);
+            } finally {
+                // 4. Habilitar la entrada
+                setInputEnabled(true);
+            }
+        }
+        
+        /**
+         * Realiza la llamada a la API con reintentos y retroceso exponencial.
+         */
+        async function generateContentWithRetry(prompt, systemPrompt, maxRetries) {
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                tools: [{ "google_search": {} }], // Usar Google Search para información actualizada
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        // Si la respuesta no es OK, lanza un error para activar el reintento
+                        throw new Error(`Error HTTP: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    
+                    const candidate = result.candidates?.[0];
+                    if (candidate && candidate.content?.parts?.[0]?.text) {
+                        return candidate.content.parts[0].text;
+                    } else {
+                        throw new Error("Respuesta de la API vacía o inesperada.");
+                    }
+
+                } catch (error) {
+                    // Si es el último intento, lanza el error final
+                    if (i === maxRetries - 1) {
+                        throw error; 
+                    }
+                    // Retroceso exponencial: 2^i segundos (1s, 2s, 4s)
+                    const delay = Math.pow(2, i) * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
+        // Inicializar con la función sendMessage() si se presiona Enter en el input
+        window.onload = () => {
+             // Esto asegura que el botón de enviar se pueda presionar con la tecla Enter
+             inputElement.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !sendButton.disabled) {
+                    e.preventDefault(); // Evita la nueva línea
+                    sendMessage();
+                }
+            });
+        };
+    </script>
+</body>
+</html>
